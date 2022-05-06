@@ -101,14 +101,14 @@ def stage_0_stop(camera):
     recObjs = camera.getRecognitionObjects()
     recObjsNum = camera.getRecognitionNumberOfObjects()
     for i in range(recObjsNum):
-        if recObjs[0].get_id() == 480:
+        if (recObjs[0].get_colors() == np.array([0,1,0])).all():
             return True
     return False
 def stage_1_stop(camera):
     recObjs = camera.getRecognitionObjects()
     recObjsNum = camera.getRecognitionNumberOfObjects()
     for i in range(recObjsNum):
-        if recObjs[0].get_id() == 488:
+        if (recObjs[0].get_colors() == np.array([0,0,1])).all():
             return True
     return False
 ##############################################################
@@ -120,12 +120,12 @@ def wall_follow_step(lidar_scan):
     right = lidar_scan[-1]
     # print(f"left:{left}",f"mid:{mid}",f"right:{right}")
     left_wall = left < wall_threshold
-    front_wall = mid < wall_threshold
+    front_wall = mid < wall_threshold*1
     right_wall = right < wall_threshold
     if front_wall or lidar_scan[125]<wall_threshold:
         # Go Right
         #print("Right")
-        return -max_omega, max_speed*0.1
+        return -max_omega*0.5, max_speed*0.1
     elif (not left_wall) and (not front_wall):
         # Go Left
         #print("Left")
@@ -161,6 +161,20 @@ def open_space_step(lidar_scan,x_hat_t,Goal_pos):
             return max_omega, 0
         else: 
             return 0, max_speed
+            
+def find_goal(camera):
+    recObjs = camera.getRecognitionObjects()
+    recObjsNum = camera.getRecognitionNumberOfObjects()
+    for i in range(recObjsNum):
+        if (recObjs[i].get_colors() == np.array([1,0,0])).all():
+            landmark = robot.getFromId(recObjs[i].get_id())
+            #G_p_L = landmark.getPosition()
+            rel_lm_trans = landmark.getPose(robotNode)
+            z = np.zeros((2,1))
+            z[0][0] = rel_lm_trans[3]
+            z[1][0] = rel_lm_trans[7]
+            
+    return False
 # SLAM
 # Robot state
 robotNode = robot.getSelf()
@@ -172,8 +186,8 @@ x_hat_t = np.array([G_p_R[0], G_p_R[1], 0])
 Sigma_x_t = np.zeros((3,3))
 #Sigma_x_t[0,0], Sigma_x_t[1,1], Sigma_x_t[2,2] = 0.01, 0.01, np.pi/90
 Sigma_n = np.zeros((2,2))
-std_n_v = max_speed*0.001
-std_n_omega = max_omega*0.001
+std_n_v = max_speed*0.01
+std_n_omega = max_omega*0.01
 Sigma_n[0,0] = std_n_v * std_n_v
 Sigma_n[1,1] = std_n_omega * std_n_omega
 
@@ -273,13 +287,13 @@ def SLAMUpdate(x_hat_t, # robot position and orientation
         S = H_full @ Sigma_x_t @ H_full.T + M @ Sigma_ms[z_idx] @ M.T
         K = Sigma_x_t @ H_full.T @ np.linalg.inv(S) 
         x_hat_t += (K @ (z-h)).T[0]
-        #
-        # Sigma_x_t = Sigma_x_t-Sigma_x_t @ H_full.T @ np.linalg.inv(S) @ H_full @ Sigma_x_t
-        #
-        I = -K @ H_full
-        for k in range(I.shape[0]):
-            I[k,k] += 1
-        Sigma_x_t = I @ Sigma_x_t @ I.T + K @ M @ Sigma_ms[z_idx] @ M.T @ K.T
+        
+        Sigma_x_t = Sigma_x_t-Sigma_x_t @ H_full.T @ np.linalg.inv(S) @ H_full @ Sigma_x_t
+        
+        # I = -K @ H_full
+        # for k in range(I.shape[0]):
+            # I[k,k] += 1
+        # Sigma_x_t = I @ Sigma_x_t @ I.T + K @ M @ Sigma_ms[z_idx] @ M.T @ K.T
         
     # add new landmarks with new measurements
     sig_rows = Sigma_x_t.shape[0]
@@ -312,9 +326,7 @@ def SLAMUpdate(x_hat_t, # robot position and orientation
                 idx_z = k
         new_x_hat_t[x_hat_t.shape[0]+i*2] = new_x_hat_t[0] + dRL[0,0]
         new_x_hat_t[x_hat_t.shape[0]+i*2+1] = new_x_hat_t[1] + dRL[1,0]
-        
-        #HR[0,2] = -np.sin(new_x_hat_t[2])*(0-new_x_hat_t[0])+np.cos(new_x_hat_t[2])*(0-new_x_hat_t[1])
-        #HR[1,2] = -np.cos(new_x_hat_t[2])*(0-new_x_hat_t[0])-np.sin(new_x_hat_t[2])*(0-new_x_hat_t[1])
+
         HR[0,2] = -np.sin(new_x_hat_t[2])*(new_x_hat_t[0] + dRL[0,0]-new_x_hat_t[0])+np.cos(new_x_hat_t[2])*(new_x_hat_t[1] + dRL[1,0]-new_x_hat_t[1])
         HR[1,2] = -np.cos(new_x_hat_t[2])*(new_x_hat_t[0] + dRL[0,0]-new_x_hat_t[0])-np.sin(new_x_hat_t[2])*(new_x_hat_t[1] + dRL[1,0]-new_x_hat_t[1])
         
@@ -394,13 +406,11 @@ while robot.step(timestep) != -1:
             z = np.zeros((2,1))
             z[0][0] = rel_lm_trans[3]+np.random.normal(0,std_m)
             z[1][0] = rel_lm_trans[7]+np.random.normal(0,std_m)
-            #z_pos[i] = [rel_lm_trans[3]+np.random.normal(0,std_m), rel_lm_trans[7]+np.random.normal(0,std_m)]
             zs.append(z)    
             Sigma_ms.append(np.asarray(Sigma_m))         
-            #print(G_p_L)
-            #print(rel_lm_trans[3], rel_lm_trans[7])
+
         x_hat_t, Sigma_x_t = SLAMUpdate(x_hat_t, Sigma_x_t, zs, Sigma_ms, dt)
-    print("GT Pos:",G_p_R,"EST", x_hat_t)
+    # print("GT Pos:",G_p_R,"EST", x_hat_t)
     if steps % plotFreq == 0:
         # pts = plot_cov(Sigma_x_t[0:2,0:2])
         # pts[0] += x_hat_t[0]
@@ -409,13 +419,14 @@ while robot.step(timestep) != -1:
         plt.scatter(x_hat_t[0],x_hat_t[1],color="b")
         plt.scatter(G_p_R[0],G_p_R[1],color="g")
         plt.axis('equal')
-    if G_p_R[0]<-2 and G_p_R[1]>-0.5 :
+    if G_p_R[0]<=-2.9 and G_p_R[1]>-0.15 :
         plt_show(x_hat_t, Sigma_x_t)
-        
+        leftMotor.setVelocity(0)
+        rightMotor.setVelocity(0)
+        break
         
     steps = steps + 1
-    #print(v_L/wheelRadius,v_R/wheelRadius,f"{G_p_R[:2]}")
-    #print(x_hat_t)
+
     
 
 # Enter here exit cleanup code.

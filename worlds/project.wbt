@@ -2,8 +2,8 @@
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.4149336369535913 0.5383602961314425 0.7334836524924946 2.1110864037747157
-  position 1.2450580438576115 -1.9016238482397554 7.632545681393848
+  orientation -0.5626780703686904 0.5652420214528762 0.6032369735933246 2.0519743361648652
+  position -0.18407261808445563 -0.03315230634569034 12.867684535629602
 }
 Robot {
   translation 2.94 0.07 0
@@ -2108,12 +2108,12 @@ Solid {
   ]
 }
 Solid {
-  translation 0.55 0.13 0.0492
+  translation 0.55 -0.04 0.0492
   scale 0.5 0.5 0.5
   children [
     Shape {
       appearance PBRAppearance {
-        baseColor 1 0.5 1
+        baseColor 0 1 0
         roughness 1
         metalness 0
       }
@@ -2124,7 +2124,7 @@ Solid {
   ]
   name "solid(4)"
   recognitionColors [
-    1 0.5 1
+    0 1 0
   ]
 }
 Solid {
@@ -2148,7 +2148,7 @@ Solid {
   ]
 }
 Solid {
-  translation -1.53 -0.16 0.0492
+  translation -2.27 -0.58 0.0492
   scale 0.5 0.5 0.5
   children [
     Shape {
@@ -2168,7 +2168,27 @@ Solid {
   ]
 }
 Solid {
-  translation -2.82 0 0.0492
+  translation -1.52 -0.23 0.0492
+  scale 0.5 0.5 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0 0 1
+        roughness 1
+        metalness 0
+      }
+      geometry Sphere {
+        radius 0.1
+      }
+    }
+  ]
+  name "solid(17)"
+  recognitionColors [
+    0 0 1
+  ]
+}
+DEF Goal Solid {
+  translation -2.9 -0.01 0.0492
   scale 0.5 0.5 0.5
   children [
     Shape {
@@ -2183,7 +2203,6 @@ Solid {
     }
   ]
   name "solid(14)"
-  locked TRUE
   recognitionColors [
     1 0 0
   ]
