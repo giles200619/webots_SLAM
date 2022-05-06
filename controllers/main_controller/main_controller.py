@@ -39,7 +39,7 @@ wheelRadius = 0.0205
 axleLength = 0.0568 
 updateFreq = 1
 plotFreq = 50
-max_omega = (6.28 * wheelRadius - max_speed) / (0.5*axleLength) *coef*0.5
+max_omega = (6.28 * wheelRadius - max_speed) / (0.5*axleLength) *coef*0.4
 
 # plot settings
 plt.style.use('ggplot')
@@ -86,6 +86,10 @@ def lidar_pcd(data):
     for i in range(len(data)):
         pts.append([-data[i].y,data[i].x])
     return np.asarray(pts)
+
+def plt_show(x_hat_t, Sigma_x_t):
+    plt.scatter(x_hat_t[3::2],x_hat_t[4::2],color="r")
+    plt.show()
         
  # pts = lidar_scan_xy(np.array(lidar.getRangeImage()))
     # plt.plot(np.array(lidar.getRangeImage()))
@@ -97,7 +101,14 @@ def stage_0_stop(camera):
     recObjs = camera.getRecognitionObjects()
     recObjsNum = camera.getRecognitionNumberOfObjects()
     for i in range(recObjsNum):
-        if recObjs[0].get_id() == 466:
+        if recObjs[0].get_id() == 480:
+            return True
+    return False
+def stage_1_stop(camera):
+    recObjs = camera.getRecognitionObjects()
+    recObjsNum = camera.getRecognitionNumberOfObjects()
+    for i in range(recObjsNum):
+        if recObjs[0].get_id() == 488:
             return True
     return False
 ##############################################################
@@ -114,7 +125,7 @@ def wall_follow_step(lidar_scan):
     if front_wall or lidar_scan[125]<wall_threshold:
         # Go Right
         #print("Right")
-        return -max_omega, 0
+        return -max_omega, max_speed*0.1
     elif (not left_wall) and (not front_wall):
         # Go Left
         #print("Left")
@@ -125,21 +136,44 @@ def wall_follow_step(lidar_scan):
         return 0,max_speed
     else:
         return 0,max_speed
-    
 
+def open_space_step(lidar_scan,x_hat_t,Goal_pos):
+    left = lidar_scan[255-125]
+    mid = lidar_scan[255]
+    right = lidar_scan[255+125]
+    #print(f"left:{left}",f"mid:{mid}",f"right:{right}")
+    left_wall = left < wall_threshold*2
+    front_wall = mid < wall_threshold*2
+    right_wall = right < wall_threshold*2
+    if not front_wall and not right_wall:
+        #d = ((Goal_pos[0][0]-x_hat_t[0])**2 + (Goal_pos[1][0]-x_hat_t[1])**2)**0.5
+        #theta = -np.pi + np.arcsin((Goal_pos[1]-x_hat_t[1])/d)
+        #theta -= x_hat_t[2]
+        r = Goal_pos[1][0]-x_hat_t[1]
+        theta = max_omega * 0.8
+        return -r * theta, max_speed
+    elif not front_wall and right_wall:
+        return max_omega*0.5, max_speed
+    else:
+        if left_wall:
+            return -max_omega, 0
+        elif right_wall:
+            return max_omega, 0
+        else: 
+            return 0, max_speed
 # SLAM
 # Robot state
 robotNode = robot.getSelf()
 G_p_R = robotNode.getPosition()
 G_ori_R = robotNode.getOrientation()
-    
+Goal_pos = np.array([[-2.82],[0]])
 dt = timestep / 1000.0
 x_hat_t = np.array([G_p_R[0], G_p_R[1], 0])
 Sigma_x_t = np.zeros((3,3))
 #Sigma_x_t[0,0], Sigma_x_t[1,1], Sigma_x_t[2,2] = 0.01, 0.01, np.pi/90
 Sigma_n = np.zeros((2,2))
-std_n_v = max_speed*0.01
-std_n_omega = max_omega*0.01
+std_n_v = max_speed*0.001
+std_n_omega = max_omega*0.001
 Sigma_n[0,0] = std_n_v * std_n_v
 Sigma_n[1,1] = std_n_omega * std_n_omega
 
@@ -165,8 +199,8 @@ def SLAMPropagate(x_hat_t, # robot position and orientation
             Sigma_x_t[:3,(3+i*2):(3+i*2)+2] = A @ Sigma_x_t[:3,(3+i*2):(3+i*2)+2]
     return x_hat_t, Sigma_x_t
 
-d_threshold1 = 16
-d_threshold2 = 500
+d_threshold1 = 10
+d_threshold2 = 100
 def SLAMUpdate(x_hat_t, # robot position and orientation
                 Sigma_x_t, # estimation uncertainty
                 zs, # measurements
@@ -240,12 +274,12 @@ def SLAMUpdate(x_hat_t, # robot position and orientation
         K = Sigma_x_t @ H_full.T @ np.linalg.inv(S) 
         x_hat_t += (K @ (z-h)).T[0]
         #
-        Sigma_x_t = Sigma_x_t-Sigma_x_t @ H_full.T @ np.linalg.inv(S) @ H_full @ Sigma_x_t
+        # Sigma_x_t = Sigma_x_t-Sigma_x_t @ H_full.T @ np.linalg.inv(S) @ H_full @ Sigma_x_t
         #
-        # I = -K @ H_full
-        # for k in range(I.shape[0]):
-            # I[k,k] += 1
-        # Sigma_x_t = I @ Sigma_x_t @ I.T + K @ M @ Sigma_ms[z_idx] @ M.T @ K.T
+        I = -K @ H_full
+        for k in range(I.shape[0]):
+            I[k,k] += 1
+        Sigma_x_t = I @ Sigma_x_t @ I.T + K @ M @ Sigma_ms[z_idx] @ M.T @ K.T
         
     # add new landmarks with new measurements
     sig_rows = Sigma_x_t.shape[0]
@@ -276,15 +310,13 @@ def SLAMUpdate(x_hat_t, # robot position and orientation
         for k in range(len(zs)):
             if (zs[k] == new_z[i]).all():
                 idx_z = k
-        print(new_z[i])
-        print(dRL)
         new_x_hat_t[x_hat_t.shape[0]+i*2] = new_x_hat_t[0] + dRL[0,0]
         new_x_hat_t[x_hat_t.shape[0]+i*2+1] = new_x_hat_t[1] + dRL[1,0]
         
-        HR[0,2] = -np.sin(new_x_hat_t[2])*(0-new_x_hat_t[0])+np.cos(new_x_hat_t[2])*(0-new_x_hat_t[1])
-        HR[1,2] = -np.cos(new_x_hat_t[2])*(0-new_x_hat_t[0])-np.sin(new_x_hat_t[2])*(0-new_x_hat_t[1])
-        #HR[0,2] = -np.sin(new_x_hat_t[2])*(new_x_hat_t[0] + dRL[0,0]-new_x_hat_t[0])+np.cos(new_x_hat_t[2])*(new_x_hat_t[1] + dRL[1,0]-new_x_hat_t[1])
-        #HR[1,2] = -np.cos(new_x_hat_t[2])*(new_x_hat_t[0] + dRL[0,0]-new_x_hat_t[0])-np.sin(new_x_hat_t[2])*(new_x_hat_t[1] + dRL[1,0]-new_x_hat_t[1])
+        #HR[0,2] = -np.sin(new_x_hat_t[2])*(0-new_x_hat_t[0])+np.cos(new_x_hat_t[2])*(0-new_x_hat_t[1])
+        #HR[1,2] = -np.cos(new_x_hat_t[2])*(0-new_x_hat_t[0])-np.sin(new_x_hat_t[2])*(0-new_x_hat_t[1])
+        HR[0,2] = -np.sin(new_x_hat_t[2])*(new_x_hat_t[0] + dRL[0,0]-new_x_hat_t[0])+np.cos(new_x_hat_t[2])*(new_x_hat_t[1] + dRL[1,0]-new_x_hat_t[1])
+        HR[1,2] = -np.cos(new_x_hat_t[2])*(new_x_hat_t[0] + dRL[0,0]-new_x_hat_t[0])-np.sin(new_x_hat_t[2])*(new_x_hat_t[1] + dRL[1,0]-new_x_hat_t[1])
         
         new_Sigma_x_t[sig_rows+2*i:sig_rows+2*i+2,sig_cols+2*i:sig_cols+2*i+2] = \
         np.linalg.inv(HL) @ (HR @ sigma_RR @ HR.T + M @ Sigma_ms[idx_z] @ M.T) @ np.linalg.inv(HL).T
@@ -308,21 +340,26 @@ steps = 0
 stage = 0 # 0 -> wall follwer, 1 -> open space, 2 -> find goal
 while robot.step(timestep) != -1:
     # moving strategy
+    lidar_scan = np.array(lidar.getRangeImage())
     if stage == 0:
         # check stop 
+        omega, v = wall_follow_step(lidar_scan)
         if stage_0_stop(camera):
             stage = 1
             omega = 0
             v = 0
             print('Starting at open space')
-            plt.show()
-            continue
-        omega, v = wall_follow_step(np.array(lidar.getRangeImage()))
-    elif stage == 1:
-        pass
+            #plt_show(x_hat_t, Sigma_x_t)
         
+    elif stage == 1:
+        omega, v = open_space_step(lidar_scan,x_hat_t,Goal_pos)
+        if stage_1_stop(camera):
+            stage = 2
+            omega = 0
+            v = 0
+            print('enter second maze')
     elif stage == 2:
-        omega, v = wall_follow_step(np.array(lidar.getRangeImage()))
+        omega, v = wall_follow_step(lidar_scan)
         
     else: 
         omega = 0
@@ -341,7 +378,7 @@ while robot.step(timestep) != -1:
     # Propergate
     x_hat_t, Sigma_x_t = SLAMPropagate(x_hat_t, Sigma_x_t, u, Sigma_n, dt)
 
-    # EKF Update
+    # Update
     recObjs = camera.getRecognitionObjects()
     recObjsNum = camera.getRecognitionNumberOfObjects()
     z_pos = np.zeros((recObjsNum, 2)) # relative position measurements   
@@ -352,7 +389,6 @@ while robot.step(timestep) != -1:
             landmark = robot.getFromId(recObjs[i].get_id())
             #G_p_L = landmark.getPosition()
             rel_lm_trans = landmark.getPose(robotNode)
-            print(f'rel_lm_trans:{rel_lm_trans}')
             std_m = 0.05
             Sigma_m = [[std_m*std_m, 0], [0,std_m*std_m]]
             z = np.zeros((2,1))
@@ -364,19 +400,22 @@ while robot.step(timestep) != -1:
             #print(G_p_L)
             #print(rel_lm_trans[3], rel_lm_trans[7])
         x_hat_t, Sigma_x_t = SLAMUpdate(x_hat_t, Sigma_x_t, zs, Sigma_ms, dt)
-    
+    print("GT Pos:",G_p_R,"EST", x_hat_t)
     if steps % plotFreq == 0:
         # pts = plot_cov(Sigma_x_t[0:2,0:2])
         # pts[0] += x_hat_t[0]
         # pts[1] += x_hat_t[1]
         # plt.scatter([pts[0,:]], [pts[1,:]],color="b")
         plt.scatter(x_hat_t[0],x_hat_t[1],color="b")
-        plt.scatter(x_hat_t[3::2],x_hat_t[4::2],color="r")
+        plt.scatter(G_p_R[0],G_p_R[1],color="g")
         plt.axis('equal')
-    
+    if G_p_R[0]<-2 and G_p_R[1]>-0.5 :
+        plt_show(x_hat_t, Sigma_x_t)
+        
+        
     steps = steps + 1
-    print(v_L/wheelRadius,v_R/wheelRadius,f"{G_p_R[:2]}")
-    print(x_hat_t)
+    #print(v_L/wheelRadius,v_R/wheelRadius,f"{G_p_R[:2]}")
+    #print(x_hat_t)
     
 
 # Enter here exit cleanup code.
