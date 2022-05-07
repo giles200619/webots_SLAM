@@ -171,8 +171,12 @@ def find_goal(camera):
             #G_p_L = landmark.getPosition()
             rel_lm_trans = landmark.getPose(robotNode)
             z = np.zeros((2,1))
-            z[0][0] = rel_lm_trans[3]
-            z[1][0] = rel_lm_trans[7]
+            x = rel_lm_trans[3]
+            y = rel_lm_trans[7]
+            if x < 0.1:
+                return 0,0
+            else:
+                return y*max_omega,max_speed
             
     return False
 # SLAM
@@ -180,7 +184,7 @@ def find_goal(camera):
 robotNode = robot.getSelf()
 G_p_R = robotNode.getPosition()
 G_ori_R = robotNode.getOrientation()
-Goal_pos = np.array([[-2.82],[0]])
+Goal_pos = np.array([[-2.9],[-0.01]])
 dt = timestep / 1000.0
 x_hat_t = np.array([G_p_R[0], G_p_R[1], 0])
 Sigma_x_t = np.zeros((3,3))
@@ -190,6 +194,8 @@ std_n_v = max_speed*0.01
 std_n_omega = max_omega*0.01
 Sigma_n[0,0] = std_n_v * std_n_v
 Sigma_n[1,1] = std_n_omega * std_n_omega
+std_m = 0.05
+Sigma_m = [[std_m*std_m, 0], [0,std_m*std_m]]
 
 def SLAMPropagate(x_hat_t, # robot position and orientation
                  Sigma_x_t, # estimation uncertainty
@@ -290,11 +296,6 @@ def SLAMUpdate(x_hat_t, # robot position and orientation
         
         Sigma_x_t = Sigma_x_t-Sigma_x_t @ H_full.T @ np.linalg.inv(S) @ H_full @ Sigma_x_t
         
-        # I = -K @ H_full
-        # for k in range(I.shape[0]):
-            # I[k,k] += 1
-        # Sigma_x_t = I @ Sigma_x_t @ I.T + K @ M @ Sigma_ms[z_idx] @ M.T @ K.T
-        
     # add new landmarks with new measurements
     sig_rows = Sigma_x_t.shape[0]
     sig_cols = Sigma_x_t.shape[1]
@@ -344,8 +345,7 @@ def SLAMUpdate(x_hat_t, # robot position and orientation
     
     return new_x_hat_t, new_Sigma_x_t
                 
-                
-    
+               
 # Main loop:
 # - perform simulation steps until Webots is stopping the controller
 steps = 0
@@ -369,9 +369,12 @@ while robot.step(timestep) != -1:
             stage = 2
             omega = 0
             v = 0
-            print('enter second maze')
+            print('Entering second maze')
     elif stage == 2:
-        omega, v = wall_follow_step(lidar_scan)
+        try:
+            omega, v = find_goal(camera)
+        except:
+            omega, v = wall_follow_step(lidar_scan)
         
     else: 
         omega = 0
@@ -401,8 +404,6 @@ while robot.step(timestep) != -1:
             landmark = robot.getFromId(recObjs[i].get_id())
             #G_p_L = landmark.getPosition()
             rel_lm_trans = landmark.getPose(robotNode)
-            std_m = 0.05
-            Sigma_m = [[std_m*std_m, 0], [0,std_m*std_m]]
             z = np.zeros((2,1))
             z[0][0] = rel_lm_trans[3]+np.random.normal(0,std_m)
             z[1][0] = rel_lm_trans[7]+np.random.normal(0,std_m)
@@ -423,6 +424,7 @@ while robot.step(timestep) != -1:
         plt_show(x_hat_t, Sigma_x_t)
         leftMotor.setVelocity(0)
         rightMotor.setVelocity(0)
+        print("Reached Goal")
         break
         
     steps = steps + 1
