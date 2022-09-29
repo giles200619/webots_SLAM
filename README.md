@@ -8,7 +8,7 @@ robot. Mahalanobis distance check is applied to distinguish landmarks.
   <img src="/images/environment.png" height="200">
   <br>Webots environment layout<br>
   <br><br>
-  <img src="/images/result.png" height="200">
+  <img src="/images/result.png" height="400">
   <br>SLAM result. Ground truth trajectory v.s. estimated trajectory and keypoint locations. <br>
   <br><br>
   
